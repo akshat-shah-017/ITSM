@@ -1,0 +1,154 @@
+# ==============================================================================
+# ITSM Tool - .gitignore
+# Prevents private/sensitive data from being pushed to GitHub
+# ==============================================================================
+
+# ==============================================================================
+# ENVIRONMENT & SECRETS - CRITICAL: Never commit these
+# ==============================================================================
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+*.env
+secrets.json
+credentials.json
+
+# ==============================================================================
+# PYTHON / DJANGO
+# ==============================================================================
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Distribution / packaging
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+wheels/
+*.whl
+
+# Database files (SQLite)
+*.sqlite3
+*.db
+db.sqlite3
+
+# Django
+*.log
+local_settings.py
+staticfiles/
+
+# Media uploads (contains user data)
+media/
+
+# Migration backups
+*.orig
+
+# ==============================================================================
+# JAVASCRIPT / NODE.JS / FRONTEND
+# ==============================================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm
+.yarn-integrity
+
+# Build outputs
+dist/
+dist-ssr/
+dev-dist/
+build/
+*.local
+
+# ==============================================================================
+# IDE & EDITOR FILES
+# ==============================================================================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ==============================================================================
+# OS-SPECIFIC FILES
+# ==============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# ==============================================================================
+# TEST & COVERAGE
+# ==============================================================================
+.coverage
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+coverage.xml
+*.cover
+.hypothesis/
+jest-coverage/
+
+# ==============================================================================
+# DOCKER (local overrides)
+# ==============================================================================
+docker-compose.override.yml
+.docker/
+
+# ==============================================================================
+# LOGS & CACHE
+# ==============================================================================
+logs/
+*.log
+.cache/
+*.cache
+
+# ==============================================================================
+# TEMPORARY FILES
+# ==============================================================================
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# ==============================================================================
+# DOCUMENTATION BUILDS
+# ==============================================================================
+docs/_build/
+site/
+
+# ==============================================================================
+# SECURITY: Files that may contain sensitive info (review before committing)
+# ==============================================================================
+# Uncomment the following if your Word docs contain sensitive information:
+# *.docx
+# *.doc
+
+# Lock files (optional - uncomment if you don't want to version lock files)
+# package-lock.json
+# requirements.lock.txt

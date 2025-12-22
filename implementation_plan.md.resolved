@@ -1,0 +1,854 @@
+# ITSM Platform - System Architecture Lock Document
+
+This document establishes the **LOCKED system architecture** for the production-grade ITSM platform. All design decisions herein are binding and must be adhered to throughout implementation.
+
+---
+
+## 1. High-Level System Architecture
+
+### 1.1 Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        FE["Frontend<br/>Vite + React + Tailwind"]
+        ZU["State Management<br/>Zustand"]
+    end
+    
+    subgraph "API Gateway Layer"
+        API["Django REST Framework<br/>JWT Authentication"]
+        RBAC["RBAC Middleware"]
+        RL["Rate Limiter"]
+    end
+    
+    subgraph "Business Logic Layer"
+        AUTH["Auth Service"]
+        TICKET["Ticket Service"]
+        EMAIL["Email Intake Service"]
+        ANALYTICS["Analytics Service"]
+        ADMIN["Admin Service"]
+    end
+    
+    subgraph "Data Layer"
+        DB[("SQL Server<br/>NEWSEQUENTIALID()")]
+        CACHE["Cache Layer<br/>(Future)"]
+        FILES["File Storage"]
+    end
+    
+    FE --> ZU
+    FE --> API
+    API --> RBAC
+    RBAC --> RL
+    RL --> AUTH
+    RL --> TICKET
+    RL --> EMAIL
+    RL --> ANALYTICS
+    RL --> ADMIN
+    AUTH --> DB
+    TICKET --> DB
+    EMAIL --> DB
+    ANALYTICS --> DB
+    ADMIN --> DB
+    TICKET --> FILES
+```
+
+### 1.2 Component Breakdown
+
+| Layer | Technology | Responsibility |
+|-------|-----------|----------------|
+| **Frontend** | Vite + React + Tailwind CSS | Role-specific UI, form handling, API consumption |
+| **State Management** | Zustand | Client-side state, auth context, UI state |
+| **Backend Framework** | Django + Django REST Framework | REST API, business logic, serialization |
+| **Authentication** | BCrypt + JWT | Password hashing, token issuance/validation |
+| **Authorization** | Custom RBAC Middleware | Role-based access enforcement at API level |
+| **Database** | Microsoft SQL Server | Persistent storage, GUID PKs (NEWSEQUENTIALID) |
+| **File Storage** | Local filesystem (Phase 1) | Attachment storage |
+
+### 1.3 Organizational Data Hierarchy
+
+```mermaid
+graph TD
+    BG["BusinessGroup"] --> CO["Company"]
+    CO --> DEPT["Department"]
+    DEPT --> TEAM["Team"]
+    TEAM --> EMP["Employee/Manager"]
+    DEPT --> SUBCAT["SubCategory"]
+    CAT["Category"] --> SUBCAT
+```
+
+### 1.4 Role Hierarchy
+
+| Role | Capabilities | Scope |
+|------|-------------|-------|
+| **User** | Create tickets, view own tickets, view ticket history | Own tickets only |
+| **Employee** | All User capabilities + email intake, self-assign, update status, close tickets | Assigned tickets + department queue |
+| **Manager** | All Employee capabilities + assign to team, view team analytics | Team-scoped |
+| **Admin** | Full system access, user/role/category management | System-wide |
+
+---
+
+## 2. Non-Negotiable Invariants
+
+> [!CAUTION]
+> These invariants are **ABSOLUTE** and must be enforced at all layers. Violation of any invariant is a **CRITICAL DEFECT**.
+
+### 2.1 Security Invariants
+
+| ID | Invariant | Enforcement Layer |
+|----|-----------|-------------------|
+| SEC-01 | **All passwords MUST be hashed using BCrypt** | Backend (Auth Service) |
+| SEC-02 | **All API endpoints MUST require valid JWT authentication** | API Gateway Middleware |
+| SEC-03 | **JWT access tokens MUST be short-lived (≤15 minutes)** | Backend (Token Service) |
+| SEC-04 | **JWT refresh tokens MUST be revocable** | Backend (Token Store) |
+| SEC-05 | **File uploads MUST be validated for type and size** | Backend (Upload Handler) |
+| SEC-06 | **Error responses MUST NOT expose internal implementation details** | All Layers |
+| SEC-07 | **Rate limiting MUST be enforced on all endpoints** | API Gateway |
+| SEC-08 | **All GUIDs MUST be treated as opaque identifiers** | Frontend + Backend |
+
+### 2.2 RBAC Invariants
+
+| ID | Invariant | Enforcement Layer |
+|----|-----------|-------------------|
+| RBAC-01 | **Users MAY view ONLY tickets they created** | Backend API |
+| RBAC-02 | **Employees MAY modify ONLY tickets assigned to them** | Backend API |
+| RBAC-03 | **Managers MAY manage tickets ONLY within their team** | Backend API |
+| RBAC-04 | **UI element hiding is COSMETIC ONLY - server MUST validate** | Backend API |
+| RBAC-05 | **Role checks MUST be enforced server-side, never client-side only** | Backend API |
+
+### 2.3 Data Integrity Invariants
+
+| ID | Invariant | Enforcement Layer |
+|----|-----------|-------------------|
+| DATA-01 | **Closed tickets MUST be immutable (no status/assignment changes)** | Backend + Database |
+| DATA-02 | **TicketHistory table MUST be append-only** | Database Constraints |
+| DATA-03 | **Cascading deletes MUST be disabled for audit-critical tables** | Database Schema |
+| DATA-04 | **All status changes MUST require mandatory notes** | Backend Validation |
+| DATA-05 | **Primary keys MUST be GUIDs using NEWSEQUENTIALID()** | Database Schema |
+
+### 2.4 Performance Invariants
+
+| ID | Invariant | Enforcement Layer |
+|----|-----------|-------------------|
+| PERF-01 | **All list endpoints MUST use server-side pagination** | Backend API |
+| PERF-02 | **Client-side pagination over full datasets is PROHIBITED** | Frontend |
+| PERF-03 | **All filtering MUST be executed at database level** | Backend API |
+| PERF-04 | **Analytics queries MUST NOT block transactional workflows** | Backend Architecture |
+| PERF-05 | **Page size MUST be capped at 100 records maximum** | Backend API |
+| PERF-06 | **Sorting MUST be limited to indexed columns only** | Backend API |
+
+### 2.5 API Contract Invariants
+
+| ID | Invariant | Format |
+|----|-----------|--------|
+| API-01 | **Paginated responses MUST include** | `{ page, page_size, total_count, results[] }` |
+| API-02 | **Default page size** | 25 |
+| API-03 | **Maximum page size** | 100 |
+| API-04 | **Pagination parameters** | `?page=N&page_size=M` |
+
+---
+
+## 3. Request/Response Flow Diagrams
+
+### 3.1 User Ticket Creation Flow
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         USER TICKET CREATION FLOW                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+1. USER INITIATES CREATE TICKET
+   ┌─────────┐                    ┌─────────────┐
+   │ Frontend│ ──────────────────►│   Zustand   │
+   │  Form   │  User fills form   │   Store     │
+   └─────────┘                    └─────────────┘
+        │
+        │ User clicks "Submit"
+        ▼
+2. FRONTEND VALIDATION
+   ┌─────────────────────────────────────────────┐
+   │ - Validate required fields                  │
+   │ - Validate file types/sizes (client-side)   │
+   │ - Prepare multipart/form-data payload       │
+   └─────────────────────────────────────────────┘
+        │
+        ▼
+3. API REQUEST
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ POST /api/tickets/                                                      │
+   │ Headers: Authorization: Bearer <jwt_token>                              │
+   │ Content-Type: multipart/form-data                                       │
+   │                                                                         │
+   │ Body: {                                                                 │
+   │   "title": "string",                                                    │
+   │   "description": "string",                                              │
+   │   "category_id": "uuid",                                                │
+   │   "subcategory_id": "uuid",                                             │
+   │   "attachments": [File, File, ...]                                      │
+   │ }                                                                       │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+4. BACKEND PROCESSING
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ a) JWT Middleware → Validate token, extract user_id                     │
+   │ b) RBAC Middleware → Verify user has permission to create tickets       │
+   │ c) Rate Limiter → Check request rate                                    │
+   │ d) Serializer → Validate payload schema                                 │
+   │ e) Business Logic:                                                      │
+   │    - Auto-populate created_by from JWT                                  │
+   │    - Derive department_id from subcategory                              │
+   │    - Generate ticket_number (unique)                                    │
+   │    - Set status = "New", is_closed = false                              │
+   │    - Validate and save attachments                                      │
+   │ f) Database → INSERT Ticket, INSERT TicketAttachments                   │
+   │ g) Insert initial TicketHistory entry                                   │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+5. RESPONSE
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ SUCCESS (201 Created):                                                  │
+   │ {                                                                       │
+   │   "id": "uuid",                                                         │
+   │   "ticket_number": "TKT-2024-00001",                                    │
+   │   "title": "string",                                                    │
+   │   "status": "New",                                                      │
+   │   "created_at": "datetime",                                             │
+   │   "created_by": { "id": "uuid", "name": "string" }                      │
+   │ }                                                                       │
+   │                                                                         │
+   │ ERROR (400 Bad Request): Validation errors                              │
+   │ ERROR (401 Unauthorized): Invalid/missing token                         │
+   │ ERROR (403 Forbidden): Insufficient permissions                         │
+   │ ERROR (429 Too Many Requests): Rate limit exceeded                      │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+6. FRONTEND UPDATE
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ - Update Zustand store with new ticket                                  │
+   │ - Navigate to ticket detail or dashboard                                │
+   │ - Show success notification                                             │
+   └─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 3.2 Employee Ticket Assignment Flow
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                      EMPLOYEE TICKET ASSIGNMENT FLOW                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+1. EMPLOYEE VIEWS UNASSIGNED QUEUE
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ GET /api/tickets/?status=New&department_id=<employee_dept>&assigned=null│
+   │ Headers: Authorization: Bearer <jwt_token>                              │
+   │                                                                         │
+   │ Response (Paginated):                                                   │
+   │ {                                                                       │
+   │   "page": 1, "page_size": 25, "total_count": 42,                        │
+   │   "results": [{ ticket }, { ticket }, ...]                              │
+   │ }                                                                       │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+2. EMPLOYEE SELF-ASSIGNS TICKET
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ POST /api/tickets/<ticket_id>/assign/                                   │
+   │ Headers: Authorization: Bearer <jwt_token>                              │
+   │                                                                         │
+   │ Body: {                                                                 │
+   │   "assigned_to": "<employee_user_id>" (self) OR null (self-assign)      │
+   │ }                                                                       │
+   │                                                                         │
+   │ NOTE: If assigned_to is null, backend assigns to requesting user        │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+3. BACKEND VALIDATION
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ a) JWT Middleware → Extract user_id, verify Employee role               │
+   │ b) RBAC Check:                                                          │
+   │    - Ticket MUST NOT be closed (is_closed = false)                      │
+   │    - Ticket MUST be in employee's department OR unassigned              │
+   │    - Employee MUST have Employee/Manager role                           │
+   │ c) If ticket already assigned → Check reassignment permissions          │
+   │    - Only Manager or current assignee can reassign                      │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+4. DATABASE OPERATIONS (ATOMIC TRANSACTION)
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ BEGIN TRANSACTION                                                       │
+   │                                                                         │
+   │ UPDATE Ticket SET                                                       │
+   │   assigned_to = <employee_user_id>,                                     │
+   │   status = 'Assigned'                                                   │
+   │ WHERE id = <ticket_id>                                                  │
+   │                                                                         │
+   │ INSERT INTO TicketHistory (                                             │
+   │   ticket_id, old_status, new_status, note, changed_by, changed_at       │
+   │ ) VALUES (                                                              │
+   │   <ticket_id>, 'New', 'Assigned',                                       │
+   │   'Ticket assigned to <employee_name>', <employee_id>, NOW()            │
+   │ )                                                                       │
+   │                                                                         │
+   │ COMMIT                                                                  │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+5. RESPONSE
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ SUCCESS (200 OK):                                                       │
+   │ {                                                                       │
+   │   "id": "uuid",                                                         │
+   │   "ticket_number": "TKT-2024-00001",                                    │
+   │   "status": "Assigned",                                                 │
+   │   "assigned_to": {                                                      │
+   │     "id": "uuid",                                                       │
+   │     "name": "Employee Name",                                            │
+   │     "email": "employee@company.com"                                     │
+   │   },                                                                    │
+   │   "assigned_at": "datetime"                                             │
+   │ }                                                                       │
+   │                                                                         │
+   │ ERROR (400): Ticket already closed                                      │
+   │ ERROR (403): Not in employee's department                               │
+   │ ERROR (404): Ticket not found                                           │
+   │ ERROR (409): Ticket already assigned (race condition)                   │
+   └─────────────────────────────────────────────────────────────────────────┘
+
+---
+
+MANAGER ASSIGNMENT VARIANT (Assigns to Team Member):
+
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ POST /api/tickets/<ticket_id>/assign/                                   │
+   │ Body: { "assigned_to": "<team_member_user_id>" }                        │
+   │                                                                         │
+   │ ADDITIONAL RBAC CHECK:                                                  │
+   │ - Requesting user MUST be Manager                                       │
+   │ - Target user MUST be in Manager's team                                 │
+   │ - Manager's team_id == Target user's team_id                            │
+   └─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 3.3 Ticket Status Update and Closure Flow
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    TICKET STATUS UPDATE AND CLOSURE FLOW                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+PART A: STATUS UPDATE (Non-Closure)
+═══════════════════════════════════
+
+1. EMPLOYEE INITIATES STATUS UPDATE
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ PATCH /api/tickets/<ticket_id>/status/                                  │
+   │ Headers: Authorization: Bearer <jwt_token>                              │
+   │                                                                         │
+   │ Body: {                                                                 │
+   │   "status": "In Progress" | "Waiting" | "On Hold" | etc.,               │
+   │   "note": "string (MANDATORY - cannot be empty)"                        │
+   │ }                                                                       │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+2. BACKEND VALIDATION
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ INVARIANT CHECKS:                                                       │
+   │ ✓ Ticket is_closed == false (DATA-01)                                   │
+   │ ✓ Note is provided and non-empty (DATA-04)                              │
+   │ ✓ User is assigned_to this ticket (RBAC-02)                             │
+   │ ✓ New status is valid transition from current status                    │
+   │                                                                         │
+   │ REJECTION CONDITIONS:                                                   │
+   │ ✗ is_closed == true → 400 "Closed tickets are immutable"                │
+   │ ✗ note is empty → 400 "Note is required for status change"              │
+   │ ✗ user != assigned_to → 403 "Not authorized"                            │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+3. DATABASE OPERATIONS (ATOMIC)
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ BEGIN TRANSACTION                                                       │
+   │                                                                         │
+   │ -- Capture old status                                                   │
+   │ SELECT status AS old_status FROM Ticket WHERE id = <ticket_id>          │
+   │                                                                         │
+   │ -- Update ticket                                                        │
+   │ UPDATE Ticket SET status = <new_status> WHERE id = <ticket_id>          │
+   │                                                                         │
+   │ -- Append to immutable history (DATA-02)                                │
+   │ INSERT INTO TicketHistory (                                             │
+   │   ticket_id, old_status, new_status, note, changed_by, changed_at       │
+   │ ) VALUES (...)                                                          │
+   │                                                                         │
+   │ COMMIT                                                                  │
+   └─────────────────────────────────────────────────────────────────────────┘
+
+
+PART B: TICKET CLOSURE
+══════════════════════
+
+1. EMPLOYEE INITIATES CLOSURE
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ POST /api/tickets/<ticket_id>/close/                                    │
+   │ Headers: Authorization: Bearer <jwt_token>                              │
+   │                                                                         │
+   │ Body: {                                                                 │
+   │   "closure_code_id": "uuid (predefined or custom)",                     │
+   │   "note": "string (MANDATORY - closure remarks)"                        │
+   │ }                                                                       │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+2. BACKEND VALIDATION
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ INVARIANT CHECKS:                                                       │
+   │ ✓ Ticket is_closed == false                                             │
+   │ ✓ Closure code exists and is active                                     │
+   │ ✓ Note is provided (DATA-04)                                            │
+   │ ✓ User is assigned_to this ticket (RBAC-02)                             │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+3. DATABASE OPERATIONS (ATOMIC)
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ BEGIN TRANSACTION                                                       │
+   │                                                                         │
+   │ -- Finalize ticket (IMMUTABLE FROM THIS POINT - DATA-01)                │
+   │ UPDATE Ticket SET                                                       │
+   │   status = 'Closed',                                                    │
+   │   is_closed = true,                                                     │
+   │   closure_code_id = <closure_code_id>,                                  │
+   │   closed_at = NOW()                                                     │
+   │ WHERE id = <ticket_id>                                                  │
+   │                                                                         │
+   │ -- Final history entry                                                  │
+   │ INSERT INTO TicketHistory (                                             │
+   │   ticket_id, old_status, new_status, note, changed_by, changed_at       │
+   │ ) VALUES (<ticket_id>, <old_status>, 'Closed', <note>, ...)             │
+   │                                                                         │
+   │ COMMIT                                                                  │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+4. POST-CLOSURE ENFORCEMENT
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ ANY subsequent request to modify this ticket:                           │
+   │                                                                         │
+   │ PATCH /api/tickets/<ticket_id>/...                                      │
+   │                                                                         │
+   │ MUST return:                                                            │
+   │ 400 Bad Request: { "error": "Closed tickets are immutable" }            │
+   │                                                                         │
+   │ ENFORCEMENT: Backend MUST check is_closed BEFORE any modification       │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+5. RESPONSE
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ SUCCESS (200 OK):                                                       │
+   │ {                                                                       │
+   │   "id": "uuid",                                                         │
+   │   "ticket_number": "TKT-2024-00001",                                    │
+   │   "status": "Closed",                                                   │
+   │   "is_closed": true,                                                    │
+   │   "closure_code": { "code": "RESOLVED", "description": "..." },         │
+   │   "closed_at": "datetime",                                              │
+   │   "closed_by": { "id": "uuid", "name": "string" }                       │
+   │ }                                                                       │
+   └─────────────────────────────────────────────────────────────────────────┘
+
+
+IMMUTABILITY ENFORCEMENT MATRIX:
+════════════════════════════════
+
+| Operation              | is_closed=false | is_closed=true |
+|------------------------|-----------------|----------------|
+| Update status          | ✓ Allowed       | ✗ BLOCKED      |
+| Update priority        | ✓ Allowed       | ✗ BLOCKED      |
+| Reassign ticket        | ✓ Allowed       | ✗ BLOCKED      |
+| Add attachment         | ✓ Allowed       | ✗ BLOCKED      |
+| Add note (history)     | ✓ Allowed       | ✗ BLOCKED      |
+| View ticket            | ✓ Allowed       | ✓ Allowed      |
+| View history           | ✓ Allowed       | ✓ Allowed      |
+```
+
+---
+
+## 4. Analytics Flows
+
+### 4.1 Employee Dashboard Analytics Flow
+
+**Purpose:** Display individual employee's operational performance metrics.
+
+**Metrics Required:**
+- Total tickets assigned (lifetime)
+- Tickets completed (closed)
+- Tickets currently open
+- Tickets in progress by status (Assigned, In Progress, Waiting)
+- Average resolution time
+- Oldest open ticket (aging indicator)
+- Tickets closed within time ranges (Today, Last 7 Days, Last 30 Days)
+
+**API Request Flow:**
+
+```
+1. EMPLOYEE LOADS DASHBOARD
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ GET /api/analytics/employee/summary/                                    │
+   │ Headers: Authorization: Bearer <jwt_token>                              │
+   │                                                                         │
+   │ RBAC: Backend extracts user_id from JWT - returns ONLY that user's data │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+2. BACKEND PROCESSING
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ Query 1: Ticket counts by status                                        │
+   │   SELECT status, COUNT(*) FROM Ticket                                   │
+   │   WHERE assigned_to = <user_id>                                         │
+   │   GROUP BY status                                                       │
+   │                                                                         │
+   │ Query 2: Average resolution time                                        │
+   │   SELECT AVG(DATEDIFF(hour, created_at, closed_at))                     │
+   │   FROM Ticket WHERE assigned_to = <user_id> AND is_closed = true        │
+   │                                                                         │
+   │ Query 3: Oldest open ticket                                             │
+   │   SELECT TOP 1 id, ticket_number, created_at                            │
+   │   FROM Ticket WHERE assigned_to = <user_id> AND is_closed = false       │
+   │   ORDER BY created_at ASC                                               │
+   │                                                                         │
+   │ Query 4: Closures by time range                                         │
+   │   SELECT                                                                │
+   │     SUM(CASE WHEN closed_at >= TODAY THEN 1 ELSE 0 END) as today,       │
+   │     SUM(CASE WHEN closed_at >= TODAY-7 THEN 1 ELSE 0 END) as week,      │
+   │     SUM(CASE WHEN closed_at >= TODAY-30 THEN 1 ELSE 0 END) as month     │
+   │   FROM Ticket WHERE assigned_to = <user_id> AND is_closed = true        │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+3. RESPONSE
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ {                                                                       │
+   │   "total_assigned": 150,                                                │
+   │   "total_closed": 120,                                                  │
+   │   "total_open": 30,                                                     │
+   │   "by_status": {                                                        │
+   │     "Assigned": 10, "In Progress": 15, "Waiting": 5                     │
+   │   },                                                                    │
+   │   "avg_resolution_hours": 24.5,                                         │
+   │   "oldest_open_ticket": {                                               │
+   │     "id": "uuid", "ticket_number": "TKT-2024-00042",                    │
+   │     "age_hours": 168                                                    │
+   │   },                                                                    │
+   │   "closed_today": 3,                                                    │
+   │   "closed_last_7_days": 15,                                             │
+   │   "closed_last_30_days": 45                                             │
+   │ }                                                                       │
+   └─────────────────────────────────────────────────────────────────────────┘
+```
+
+**RBAC Enforcement:**
+- Employee can ONLY see their own analytics
+- Backend MUST filter by `assigned_to = requesting_user_id`
+- No cross-employee data exposure
+
+**Performance Considerations:**
+- Queries use indexed columns: `assigned_to`, `status`, `is_closed`, `created_at`, `closed_at`
+- Single aggregated response (no multiple round-trips)
+- Non-blocking: Analytics endpoint is separate from transactional ticket APIs
+
+---
+
+### 4.2 Manager Dashboard Analytics Flow
+
+**Purpose:** Consolidated view of team performance and workload distribution.
+
+**Metrics Required:**
+- Total tickets assigned to team
+- Team-wide: closed vs open
+- Per-employee ticket distribution
+- Per-employee average resolution time
+- Aging tickets across team
+- Tickets by status (team-wide)
+- Ticket volume trends over time
+- Priority breakdown (internal, not visible to Users)
+
+**API Request Flow:**
+
+```
+1. MANAGER LOADS DASHBOARD
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ GET /api/analytics/manager/team-summary/                                │
+   │ Headers: Authorization: Bearer <jwt_token>                              │
+   │                                                                         │
+   │ RBAC: Backend extracts user_id, looks up team_id where user is manager  │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+2. BACKEND AUTHORIZATION
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ Verify requesting user is Manager:                                      │
+   │   SELECT team_id FROM Team WHERE manager_id = <user_id>                 │
+   │                                                                         │
+   │ If no team found → 403 Forbidden                                        │
+   │                                                                         │
+   │ Get team members:                                                       │
+   │   SELECT user_id FROM UserRole WHERE team_id = <manager_team_id>        │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+3. AGGREGATION QUERIES (Optimized)
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ Query 1: Team totals                                                    │
+   │   SELECT                                                                │
+   │     COUNT(*) as total,                                                  │
+   │     SUM(CASE WHEN is_closed = 1 THEN 1 ELSE 0 END) as closed,           │
+   │     SUM(CASE WHEN is_closed = 0 THEN 1 ELSE 0 END) as open              │
+   │   FROM Ticket WHERE assigned_to IN (<team_member_ids>)                  │
+   │                                                                         │
+   │ Query 2: Per-employee distribution                                      │
+   │   SELECT                                                                │
+   │     u.id, u.name,                                                       │
+   │     COUNT(t.id) as total_tickets,                                       │
+   │     SUM(CASE WHEN t.is_closed = 0 THEN 1 ELSE 0 END) as open,           │
+   │     AVG(CASE WHEN t.is_closed = 1                                       │
+   │         THEN DATEDIFF(hour, t.created_at, t.closed_at) END) as avg_res  │
+   │   FROM User u                                                           │
+   │   LEFT JOIN Ticket t ON t.assigned_to = u.id                            │
+   │   WHERE u.id IN (<team_member_ids>)                                     │
+   │   GROUP BY u.id, u.name                                                 │
+   │                                                                         │
+   │ Query 3: Aging tickets (open > 48 hours)                                │
+   │   SELECT id, ticket_number, assigned_to, created_at,                    │
+   │          DATEDIFF(hour, created_at, GETDATE()) as age_hours             │
+   │   FROM Ticket                                                           │
+   │   WHERE assigned_to IN (<team_member_ids>)                              │
+   │     AND is_closed = 0                                                   │
+   │     AND created_at < DATEADD(hour, -48, GETDATE())                      │
+   │   ORDER BY created_at ASC                                               │
+   │                                                                         │
+   │ Query 4: Status breakdown                                               │
+   │   SELECT status, COUNT(*) as count                                      │
+   │   FROM Ticket WHERE assigned_to IN (<team_member_ids>)                  │
+   │   GROUP BY status                                                       │
+   │                                                                         │
+   │ Query 5: Priority breakdown (internal only)                             │
+   │   SELECT priority, COUNT(*) as count                                    │
+   │   FROM Ticket WHERE assigned_to IN (<team_member_ids>)                  │
+   │                 AND is_closed = 0                                       │
+   │   GROUP BY priority                                                     │
+   │                                                                         │
+   │ Query 6: Volume trends (last 30 days)                                   │
+   │   SELECT CAST(created_at AS DATE) as date, COUNT(*) as count            │
+   │   FROM Ticket WHERE assigned_to IN (<team_member_ids>)                  │
+   │                 AND created_at >= DATEADD(day, -30, GETDATE())          │
+   │   GROUP BY CAST(created_at AS DATE)                                     │
+   │   ORDER BY date                                                         │
+   └─────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+4. RESPONSE
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ {                                                                       │
+   │   "team_summary": {                                                     │
+   │     "total_tickets": 500,                                               │
+   │     "closed": 420,                                                      │
+   │     "open": 80                                                          │
+   │   },                                                                    │
+   │   "per_employee": [                                                     │
+   │     { "id": "uuid", "name": "John", "total": 100,                       │
+   │       "open": 15, "avg_resolution_hours": 20.5 },                       │
+   │     { "id": "uuid", "name": "Jane", "total": 120,                       │
+   │       "open": 10, "avg_resolution_hours": 18.2 }                        │
+   │   ],                                                                    │
+   │   "aging_tickets": [                                                    │
+   │     { "id": "uuid", "ticket_number": "TKT-...", "age_hours": 96 }       │
+   │   ],                                                                    │
+   │   "by_status": { "Assigned": 20, "In Progress": 40, "Waiting": 20 },    │
+   │   "by_priority": { "P1": 5, "P2": 15, "P3": 40, "P4": 20 },              │
+   │   "volume_trend": [                                                     │
+   │     { "date": "2024-12-01", "count": 15 },                              │
+   │     { "date": "2024-12-02", "count": 22 }                               │
+   │   ]                                                                     │
+   │ }                                                                       │
+   └─────────────────────────────────────────────────────────────────────────┘
+```
+
+**RBAC Enforcement:**
+- Manager sees ONLY their team's data
+- Backend MUST verify `Team.manager_id = requesting_user_id`
+- No cross-team data exposure
+
+**Non-Blocking Architecture (PERF-04):**
+- Analytics queries run on separate connection pool or read replica (future)
+- Analytics endpoints have lower priority than transactional endpoints
+- Dashboard data can tolerate slight staleness (cache TTL: 30 seconds acceptable)
+- Heavy aggregation queries should not lock Ticket table for writes
+
+**Performance Safeguards:**
+- All JOINs and WHERE clauses use indexed columns
+- `assigned_to`, `is_closed`, `status`, `created_at` must be indexed
+- Consider materialized views for volume_trend if data grows large
+
+---
+
+## 5. Risk and Ambiguity Register
+
+> [!WARNING]
+> The following items represent **unresolved ambiguities, assumptions, or potential failure points**. Each must be addressed before implementation proceeds.
+
+### 5.1 Critical Ambiguities (Must Resolve Before Development)
+
+| ID | Category | Risk/Ambiguity | SRS Reference | Impact | Recommendation |
+|----|----------|----------------|---------------|--------|----------------|
+| AMB-01 | **Auth** | Active Directory integration scope undefined | SRS 3.1.1 | High | Define AD attributes mapping, fallback behavior, and timeline |
+| AMB-02 | **Status** | Ticket status values not enumerated | SRS 3.3.4 | High | Define complete status taxonomy: New, Assigned, In Progress, Waiting, On Hold, Closed |
+| AMB-03 | **Priority** | Priority levels not specified | SRS 3.3.6 | Medium | Confirm P1-P4 scale with business definitions |
+| AMB-04 | **Ticket Number** | Format not specified | Database 5.1 | Low | Propose: `TKT-YYYY-NNNNN` (e.g., TKT-2024-00001) |
+| AMB-05 | **File Storage** | Storage strategy undefined | SRS 3.2.1 | High | Define: local filesystem vs object storage, path structure, retention policy |
+| AMB-06 | **Attachment Limits** | Size/type restrictions not specified | SRS 4.1 | Medium | Define max file size (e.g., 25MB), allowed types |
+| AMB-07 | **Session Management** | Token refresh mechanism undefined | SRS 4.1 | High | Define refresh token rotation strategy and expiry |
+
+### 5.2 Assumptions (Require Validation)
+
+| ID | Assumption | Risk if Invalid |
+|----|------------|-----------------|
+| ASM-01 | One user can have multiple roles (UserRole table supports this) | Schema redesign if single-role |
+| ASM-02 | Department is derived from SubCategory selection during ticket creation | Logic error if department selection separate |
+| ASM-03 | Email drag-drop is via browser File API (not Outlook plugin) | Significant scope change if plugin required |
+| ASM-04 | "On Behalf" ticket creation requires same form fields as User creation | Additional fields if different |
+| ASM-05 | Analytics data is pulled real-time (no pre-aggregation) | Performance issues at scale |
+| ASM-06 | Single timezone for all timestamps (server timezone) | Timezone handling complexity if multi-tz |
+| ASM-07 | Analytics can tolerate 30-second data staleness | UX issues if real-time expected |
+| ASM-08 | Overdue threshold is 48 hours (not configurable per priority) | Business logic error if SLA-based |
+
+### 5.3 Potential Failure Points
+
+| ID | Failure Point | Likelihood | Impact | Mitigation |
+|----|--------------|-----------|--------|------------|
+| FAIL-01 | Race condition on ticket self-assignment | Medium | Data integrity | Use optimistic locking or `SELECT FOR UPDATE` |
+| FAIL-02 | Large file uploads blocking API threads | Medium | Performance | Implement async upload, chunked uploads |
+| FAIL-03 | Analytics queries blocking transactional DB | High | Performance | Read replica or materialized views (PERF-04) |
+| FAIL-04 | JWT token hijacking | Low | Security | Short expiry, refresh rotation, secure storage |
+| FAIL-05 | Email HTML rendering XSS vulnerabilities | High | Security | Sanitize HTML, render in sandboxed iframe |
+| FAIL-06 | Bulk email import overwhelming system | Medium | Availability | Rate limit email processing, queue mechanism |
+| FAIL-07 | Race condition on ticket closure | Medium | Data integrity | Check `is_closed` inside transaction before update |
+| FAIL-08 | Concurrent status updates causing lost updates | Medium | Data integrity | Use version column or optimistic concurrency |
+
+### 5.4 Future Integration Risks
+
+| ID | Risk Area | Description | Impact | Mitigation |
+|----|-----------|-------------|--------|------------|
+| FUT-01 | **Active Directory Integration** | AD schema differences, attribute mapping, group sync frequency | High | Design auth abstraction layer; plan AD-fallback behavior |
+| FUT-02 | **File Storage Scalability** | Local filesystem won't scale for large attachments or high volume | Medium | Design storage interface for future S3/Azure Blob migration |
+| FUT-03 | **Analytics Performance at Scale** | Real-time queries will degrade with 100K+ tickets | High | Plan for read replica, caching layer, or pre-aggregated tables |
+| FUT-04 | **SLA Integration** | Future SLA tracking will require schema changes | Medium | Reserve fields or design extensible status model |
+
+### 5.5 Concurrency and Race Condition Risks
+
+| ID | Scenario | Risk | Mitigation Strategy |
+|----|----------|------|---------------------|
+| RACE-01 | Two employees self-assign same ticket simultaneously | Double assignment, data inconsistency | Use `SELECT ... FOR UPDATE` or check `assigned_to IS NULL` in WHERE clause |
+| RACE-02 | Employee closes ticket while another updates status | Closure might fail or be overwritten | Check `is_closed = false` inside atomic transaction |
+| RACE-03 | Manager reassigns while employee is working | Confusion, lost work | Optimistic locking with version number; notify on assignment change |
+| RACE-04 | Concurrent attachment uploads to same ticket | Partial uploads, orphaned files | Use transaction for metadata; cleanup job for orphans |
+
+### 5.6 Missing Requirements
+
+| ID | Missing Item | Severity | Notes |
+|----|-------------|----------|-------|
+| MISS-01 | **Email ingestion API endpoint** | High | SRS mentions drag-drop but no API contract defined |
+| MISS-02 | **SLA definitions and breach logic** | Medium | Listed as future but may affect ticket schema |
+| MISS-03 | **Notification system design** | Medium | Listed as future but important for MVP |
+| MISS-04 | **Audit log requirements beyond TicketHistory** | Low | User actions, login attempts, admin changes |
+| MISS-05 | **Data retention and archival policy** | Medium | Affects database sizing and compliance |
+| MISS-06 | **Multi-tenant considerations** | Low | BusinessGroup exists but multi-tenancy undefined |
+
+---
+
+## 6. Phase-Complete Checklist
+
+> [!IMPORTANT]
+> ALL items must be checked before proceeding to Phase 2 (Database/Model Validation).
+
+### 6.1 Architecture Lock Confirmation
+
+- [ ] High-level architecture diagram reviewed and approved
+- [ ] Component responsibilities clearly defined
+- [ ] Technology stack confirmed (Django+DRF, Vite+React, SQL Server)
+- [ ] No alternative stacks under consideration
+
+### 6.2 Invariants Documentation
+
+- [ ] All 8 security invariants documented and accepted
+- [ ] All 5 RBAC invariants documented and accepted
+- [ ] All 5 data integrity invariants documented and accepted
+- [ ] All 6 performance invariants documented and accepted
+- [ ] API contract invariants (pagination format) confirmed
+
+### 6.3 Request/Response Flows
+
+- [ ] User ticket creation flow validated (payload, validation, RBAC)
+- [ ] Employee ticket assignment flow validated (self-assign, manager-assign)
+- [ ] Ticket status update flow validated (mandatory notes, RBAC)
+- [ ] Ticket closure flow validated (closure codes, immutability)
+- [ ] All error responses defined (400, 401, 403, 404, 409, 429)
+
+### 6.4 Analytics Flows
+
+- [ ] Employee dashboard metrics defined
+- [ ] Manager dashboard metrics defined
+- [ ] Analytics API endpoints specified
+- [ ] RBAC enforcement for analytics confirmed
+- [ ] Non-blocking strategy for analytics documented (PERF-04)
+
+### 6.5 Risk Register Complete
+
+- [ ] All critical ambiguities identified (7 items)
+- [ ] All assumptions documented (8 items)
+- [ ] All failure points catalogued with mitigations (8 items)
+- [ ] Future integration risks documented (4 items)
+- [ ] Concurrency/race condition risks addressed (4 items)
+- [ ] Missing requirements listed (6 items)
+
+### 6.6 Stakeholder Sign-Off
+
+- [ ] Architecture approved by technical lead
+- [ ] Risk register acknowledged by product owner
+- [ ] Ambiguities assigned owners for resolution
+- [ ] Timeline for Phase 2 agreed
+
+---
+
+## Verification Plan
+
+Since this is an architecture document (no code changes), verification consists of:
+
+### Document Review
+- Manual review by user/stakeholder to confirm:
+  - Architecture aligns with SRS requirements
+  - All invariants are acceptable
+  - Flow diagrams cover required scenarios
+  - Analytics flows are complete
+  - Risk register captures known concerns
+  - Checklist items are appropriate
+
+### No Automated Tests Required
+This document produces no code changes. Verification is through stakeholder approval.
+
+---
+
+*Document Version: 1.1*  
+*Created: 2025-12-16*  
+*Updated: 2025-12-16*  
+*Status: **LOCKED** — No architectural changes permitted beyond this point*  
+*Lock Confirmed: 2025-12-16T16:23:00+05:30*
