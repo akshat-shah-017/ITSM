@@ -3,13 +3,14 @@ import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth';
 import { ThemeToggle } from './ThemeToggle';
-import { LogOut, User, Mail, Phone, Shield, Clock, ChevronDown, BadgeCheck, Building2, Landmark, Building, Users } from 'lucide-react';
+import { LogOut, User, Mail, Phone, Shield, Clock, ChevronDown, BadgeCheck, Building2, Landmark, Building, Users, Menu, X } from 'lucide-react';
 import Logo from '../../assets/logo.svg';
 import { createPortal } from 'react-dom';
 
 export function Navbar() {
     const { user, isAuthenticated, logout } = useAuth();
     const [showUserCard, setShowUserCard] = useState(false);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const userButtonRef = useRef<HTMLButtonElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -31,6 +32,18 @@ export function Navbar() {
             return () => document.removeEventListener('mousedown', handleClickOutside);
         }
     }, [showUserCard]);
+
+    // Emit event when mobile menu toggles
+    useEffect(() => {
+        window.dispatchEvent(new CustomEvent('mobileSidebarToggle', { detail: mobileMenuOpen }));
+    }, [mobileMenuOpen]);
+
+    // Listen for sidebar close event (when user navigates via sidebar links)
+    useEffect(() => {
+        const handleSidebarClose = () => setMobileMenuOpen(false);
+        window.addEventListener('mobileSidebarClose', handleSidebarClose);
+        return () => window.removeEventListener('mobileSidebarClose', handleSidebarClose);
+    }, []);
 
     // Format last login date
     const formatLastLogin = (dateString: string | null) => {
@@ -58,19 +71,33 @@ export function Navbar() {
     return (
         <header className="fixed top-0 left-0 right-0 z-50 h-16 bg-white/80 dark:bg-[#0a0a0a]/90 backdrop-blur-xl border-b border-surface-200/50 dark:border-[#262626]/50">
             <div className="h-full flex items-center justify-between px-4 md:px-6 max-w-[1920px] mx-auto">
-                {/* Logo Section */}
-                <Link
-                    to="/dashboard"
-                    className="flex items-center gap-3 group"
-                >
-                    <div className="h-8 md:h-9 transition-transform duration-300 group-hover:scale-105">
-                        <img
-                            src={Logo}
-                            alt="Blackbox ITSM"
-                            className="h-full w-auto"
-                        />
-                    </div>
-                </Link>
+                {/* Left Section: Hamburger + Logo */}
+                <div className="flex items-center gap-3">
+                    {/* Mobile Hamburger Menu */}
+                    {isAuthenticated && (
+                        <button
+                            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                            className="md:hidden p-2 rounded-lg text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+                            aria-label="Toggle navigation menu"
+                        >
+                            {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+                        </button>
+                    )}
+
+                    {/* Logo Section */}
+                    <Link
+                        to="/dashboard"
+                        className="flex items-center gap-3 group"
+                    >
+                        <div className="h-8 md:h-9 transition-transform duration-300 group-hover:scale-105">
+                            <img
+                                src={Logo}
+                                alt="Blackbox ITSM"
+                                className="h-full w-auto"
+                            />
+                        </div>
+                    </Link>
+                </div>
 
                 {/* Right Section */}
                 <div className="flex items-center gap-3">

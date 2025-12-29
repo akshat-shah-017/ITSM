@@ -36,22 +36,40 @@ export function LoginPage() {
     return (
         <div className="min-h-screen w-full flex bg-white relative overflow-hidden">
 
+            {/* Mobile-only gradient background */}
+            <div className="lg:hidden absolute inset-0 bg-gradient-to-br from-primary-50 via-cyan-50 to-blue-100">
+                {/* Animated orbs for mobile */}
+                <div className="absolute top-20 right-10 w-24 h-24 bg-primary-400/20 rounded-full blur-2xl animate-pulse" />
+                <div className="absolute top-40 left-8 w-16 h-16 bg-cyan-400/30 rounded-full blur-xl animate-pulse" style={{ animationDelay: '0.5s' }} />
+                <div className="absolute bottom-32 right-20 w-20 h-20 bg-blue-400/20 rounded-full blur-2xl animate-pulse" style={{ animationDelay: '1s' }} />
+            </div>
+
             {/* Left Side - Login Form */}
-            <div className="w-full lg:w-[45%] xl:w-[40%] flex flex-col justify-center p-8 lg:p-16 relative z-10 bg-white">
+            <div className="w-full lg:w-[45%] xl:w-[40%] flex flex-col justify-center p-6 sm:p-8 lg:p-16 relative z-10 lg:bg-white">
 
                 <div className="relative z-10 w-full max-w-md mx-auto">
 
+                    {/* Mobile-only mini globe icon */}
+                    <div className="lg:hidden flex justify-center mb-6">
+                        <div className="relative w-16 h-16">
+                            <div className="absolute inset-0 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 shadow-lg shadow-blue-500/30" />
+                            <div className="absolute inset-2 rounded-full border-2 border-white/30" />
+                            <div className="absolute top-3 left-4 w-2 h-2 bg-white rounded-full animate-pulse" />
+                            <div className="absolute bottom-4 right-3 w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse" style={{ animationDelay: '0.5s' }} />
+                        </div>
+                    </div>
+
                     {/* Logo */}
-                    <div className="mb-12">
-                        <img src={Logo} alt="Blackbox" className="w-44 h-auto" />
+                    <div className="mb-8 lg:mb-12 text-center lg:text-left">
+                        <img src={Logo} alt="Blackbox" className="w-36 lg:w-44 h-auto mx-auto lg:mx-0" />
                     </div>
 
                     {/* Welcome Text */}
-                    <div className="mb-10">
-                        <h1 className="text-4xl font-bold text-surface-900 mb-3">
+                    <div className="mb-8 lg:mb-10 text-center lg:text-left">
+                        <h1 className="text-3xl lg:text-4xl font-bold text-surface-900 mb-2 lg:mb-3">
                             Sign In
                         </h1>
-                        <p className="text-surface-500 text-lg">
+                        <p className="text-surface-500 text-base lg:text-lg">
                             Access your IT service management portal
                         </p>
                     </div>

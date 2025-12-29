@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../auth';
 import {
     LayoutDashboard,
@@ -18,6 +18,26 @@ import {
 export function Sidebar() {
     const { isAuthenticated, isEmployee, isManager, isAdmin } = useAuth();
     const [isCollapsed, setIsCollapsed] = useState(false);
+    const [isMobileOpen, setIsMobileOpen] = useState(false);
+    const location = useLocation();
+
+    // Listen for mobile menu toggle from Navbar
+    useEffect(() => {
+        const handleMobileToggle = (e: CustomEvent<boolean>) => {
+            setIsMobileOpen(e.detail);
+        };
+        window.addEventListener('mobileSidebarToggle', handleMobileToggle as EventListener);
+        return () => window.removeEventListener('mobileSidebarToggle', handleMobileToggle as EventListener);
+    }, []);
+
+    // Close mobile menu on route change and notify Navbar
+    useEffect(() => {
+        if (isMobileOpen) {
+            setIsMobileOpen(false);
+            // Notify Navbar to reset hamburger icon
+            window.dispatchEvent(new CustomEvent('mobileSidebarClose'));
+        }
+    }, [location.pathname]);
 
     if (!isAuthenticated) return null;
 
@@ -34,17 +54,17 @@ export function Sidebar() {
                     : 'text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800/50'
                 }
             `}
-            title={isCollapsed ? label : ''}
+            title={isCollapsed && !isMobileOpen ? label : ''}
         >
             <Icon size={20} strokeWidth={2} className="shrink-0 transition-colors" />
-            {!isCollapsed && (
+            {(!isCollapsed || isMobileOpen) && (
                 <span className="truncate text-sm opacity-0 animate-fade-in fill-mode-forwards" style={{ animationDelay: '50ms' }}>
                     {label}
                 </span>
             )}
 
-            {/* Tooltip for collapsed state */}
-            {isCollapsed && (
+            {/* Tooltip for collapsed state (desktop only) */}
+            {isCollapsed && !isMobileOpen && (
                 <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-2 bg-surface-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity shadow-lg">
                     {label}
                 </div>
@@ -53,25 +73,15 @@ export function Sidebar() {
     );
 
     const SectionLabel = ({ label }: { label: string }) => (
-        !isCollapsed && (
+        (!isCollapsed || isMobileOpen) && (
             <div className="px-4 mt-6 mb-3 text-xs font-bold uppercase tracking-wider text-surface-400 dark:text-surface-500">
                 {label}
             </div>
         )
     );
 
-    return (
-        <aside
-            className={`
-                sticky top-16 h-[calc(100vh-4rem)] z-40
-                bg-white/80 dark:bg-[#0a0a0a]/90 
-                backdrop-blur-xl
-                border-r border-surface-200/50 dark:border-[#262626]/50
-                transition-all duration-300 ease-in-out
-                flex flex-col shrink-0
-                ${isCollapsed ? 'w-20' : 'w-64'}
-            `}
-        >
+    const sidebarContent = (
+        <>
             <div className="flex-1 overflow-y-auto py-6 px-3 custom-scrollbar">
 
                 <SectionLabel label="Overview" />
@@ -104,8 +114,8 @@ export function Sidebar() {
                 )}
             </div>
 
-            {/* Footer / Collapse Toggle */}
-            <div className="p-4 border-t border-surface-200/50 dark:border-surface-800/50">
+            {/* Footer / Collapse Toggle - Desktop only */}
+            <div className="hidden md:block p-4 border-t border-surface-200/50 dark:border-surface-800/50">
                 <button
                     onClick={toggleCollapsed}
                     className="w-full flex items-center justify-center p-3 rounded-xl text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500/50"
@@ -113,7 +123,43 @@ export function Sidebar() {
                     {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
                 </button>
             </div>
-        </aside>
+        </>
+    );
+
+    return (
+        <>
+            {/* Desktop Sidebar */}
+            <aside
+                className={`
+                    hidden md:flex flex-col
+                    sticky top-16 h-[calc(100vh-4rem)] z-40
+                    bg-white/80 dark:bg-[#0a0a0a]/90 
+                    backdrop-blur-xl
+                    border-r border-surface-200/50 dark:border-[#262626]/50
+                    transition-all duration-300 ease-in-out shrink-0
+                    ${isCollapsed ? 'w-20' : 'w-64'}
+                `}
+            >
+                {sidebarContent}
+            </aside>
+
+            {/* Mobile Sidebar Overlay */}
+            {isMobileOpen && (
+                <>
+                    {/* Backdrop */}
+                    <div
+                        className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm md:hidden"
+                        onClick={() => window.dispatchEvent(new CustomEvent('mobileSidebarToggle', { detail: false }))}
+                    />
+
+                    {/* Mobile Sidebar */}
+                    <aside
+                        className="fixed top-16 left-0 bottom-0 z-50 w-72 flex flex-col bg-white dark:bg-surface-900 border-r border-surface-200 dark:border-surface-700 animate-slide-in-left md:hidden"
+                    >
+                        {sidebarContent}
+                    </aside>
+                </>
+            )}
+        </>
     );
 }
-

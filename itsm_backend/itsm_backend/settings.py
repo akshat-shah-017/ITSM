@@ -15,15 +15,20 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get(
-    'DJANGO_SECRET_KEY',
-    'django-insecure-dev-key-change-in-production-itsm-backend-2024'
-)
-
-# SECURITY WARNING: don't run with debug turned on in production!
+# In production, DJANGO_SECRET_KEY must be set - no fallback allowed
+_secret_key = os.environ.get('DJANGO_SECRET_KEY')
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+if _secret_key:
+    SECRET_KEY = _secret_key
+elif DEBUG:
+    # Allow insecure fallback ONLY in development mode
+    SECRET_KEY = 'django-insecure-dev-key-CHANGE-IN-PRODUCTION'
+else:
+    raise ValueError("DJANGO_SECRET_KEY environment variable is required in production mode (DEBUG=False)")
+
+# SECURITY WARNING: don't run with debug turned on in production!
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,10.233.17.209').split(',')
 
 # Application definition
 INSTALLED_APPS = [
@@ -103,15 +108,29 @@ DATABASES = {
 # Custom User Model
 AUTH_USER_MODEL = 'accounts.User'
 
-# CORS Configuration
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:3001',
-    'http://127.0.0.1:3001',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-]
+# CORS Configuration - Environment-driven for production flexibility
+# Default: localhost origins for development
+# Production: Set CORS_ORIGINS=https://app.example.com,https://admin.example.com
+_default_cors = 'http://localhost:3001,http://127.0.0.1:3001,http://localhost:5173,http://127.0.0.1:5173,http://10.233.17.209:5173'
+CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ORIGINS', _default_cors).split(',')
 CORS_ALLOW_CREDENTIALS = True
 
+
+# ============================================================================
+# Azure AD / Microsoft Entra ID Configuration (PLACEHOLDER)
+# ============================================================================
+# UNCOMMENT BELOW WHEN AZURE AD CREDENTIALS ARE AVAILABLE
+# Requires: pip install msal
+# 
+# AZURE_AD = {
+#     'CLIENT_ID': os.environ.get('AZURE_AD_CLIENT_ID'),
+#     'CLIENT_SECRET': os.environ.get('AZURE_AD_CLIENT_SECRET'),
+#     'TENANT_ID': os.environ.get('AZURE_AD_TENANT_ID'),
+#     'REDIRECT_URI': os.environ.get('AZURE_AD_REDIRECT_URI', 'http://localhost:5003/api/auth/azure/callback/'),
+#     'AUTHORITY': f"https://login.microsoftonline.com/{os.environ.get('AZURE_AD_TENANT_ID', '')}",
+#     'SCOPES': ['User.Read'],
+#     'FRONTEND_URL': os.environ.get('FRONTEND_URL', 'http://localhost:5173'),
+# }
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [

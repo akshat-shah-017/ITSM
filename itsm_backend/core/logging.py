@@ -141,18 +141,26 @@ class ConsoleFormatter(logging.Formatter):
         return base
 
 
-def get_logging_config(debug: bool = False, log_level: str = 'INFO') -> dict:
+def get_logging_config(debug: bool = False, log_level: str = 'INFO', log_dir: str = 'logs') -> dict:
     """
     Get Django LOGGING configuration.
     
     Args:
         debug: If True, use console formatter; else JSON
         log_level: Root log level (INFO, DEBUG, WARNING, ERROR)
+        log_dir: Directory for log files (default: 'logs')
     
     Returns:
         Dict suitable for Django LOGGING setting
     """
-    formatter = 'console' if debug else 'json'
+    import os
+    from pathlib import Path
+    
+    # Ensure log directory exists
+    log_path = Path(log_dir)
+    log_path.mkdir(parents=True, exist_ok=True)
+    
+    console_formatter = 'console' if debug else 'json'
     
     return {
         'version': 1,
@@ -171,57 +179,68 @@ def get_logging_config(debug: bool = False, log_level: str = 'INFO') -> dict:
             },
         },
         'handlers': {
-            'default': {
+            'console': {
                 'class': 'logging.StreamHandler',
-                'formatter': formatter,
+                'formatter': console_formatter,
                 'filters': ['request_context'],
+            },
+            'file': {
+                'class': 'logging.handlers.TimedRotatingFileHandler',
+                'filename': os.path.join(log_dir, 'itsm.json'),
+                'when': 'midnight',
+                'interval': 1,
+                'backupCount': 30,  # Keep 30 days of logs
+                'formatter': 'json',
+                'filters': ['request_context'],
+                'encoding': 'utf-8',
             },
         },
         'root': {
-            'handlers': ['default'],
+            'handlers': ['console', 'file'],
             'level': log_level,
         },
         'loggers': {
             'django': {
-                'handlers': ['default'],
+                'handlers': ['console', 'file'],
                 'level': log_level,
                 'propagate': False,
             },
             'django.request': {
-                'handlers': ['default'],
+                'handlers': ['console', 'file'],
                 'level': 'WARNING',  # Reduce Django request noise
                 'propagate': False,
             },
             'django.db.backends': {
-                'handlers': ['default'],
+                'handlers': ['console', 'file'],
                 'level': 'WARNING',  # Reduce SQL noise
                 'propagate': False,
             },
             # Application loggers
             'accounts': {
-                'handlers': ['default'],
+                'handlers': ['console', 'file'],
                 'level': log_level,
                 'propagate': False,
             },
             'tickets': {
-                'handlers': ['default'],
+                'handlers': ['console', 'file'],
                 'level': log_level,
                 'propagate': False,
             },
             'analytics': {
-                'handlers': ['default'],
+                'handlers': ['console', 'file'],
                 'level': log_level,
                 'propagate': False,
             },
             'email_intake': {
-                'handlers': ['default'],
+                'handlers': ['console', 'file'],
                 'level': log_level,
                 'propagate': False,
             },
             'core': {
-                'handlers': ['default'],
+                'handlers': ['console', 'file'],
                 'level': log_level,
                 'propagate': False,
             },
         },
     }
+

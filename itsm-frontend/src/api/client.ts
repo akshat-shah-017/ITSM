@@ -12,7 +12,8 @@ import {
 } from '../auth/tokenStorage';
 
 // Get base URL from environment variable
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5003';
+// In production, VITE_API_BASE_URL must be set - localhost fallback only for dev
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:5003' : (() => { throw new Error('VITE_API_BASE_URL is required in production'); })());
 
 /**
  * Create the axios instance with base configuration

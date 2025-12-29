@@ -252,7 +252,7 @@ export function AdvancedAnalyticsPage() {
                             {companyPieData.length > 0 ? (
                                 <ResponsiveContainer width="100%" height={200}>
                                     <PieChart>
-                                        <Pie data={companyPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2} label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`} labelLine={false}>
+                                        <Pie data={companyPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2} label={({ name, percent }) => `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`} labelLine={false}>
                                             {companyPieData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                                         </Pie>
                                         <Tooltip />
@@ -268,7 +268,7 @@ export function AdvancedAnalyticsPage() {
                             {bgPieData.length > 0 ? (
                                 <ResponsiveContainer width="100%" height={200}>
                                     <PieChart>
-                                        <Pie data={bgPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2} label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`} labelLine={false}>
+                                        <Pie data={bgPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2} label={({ name, percent }) => `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`} labelLine={false}>
                                             {bgPieData.map((_, i) => <Cell key={i} fill={CHART_COLORS[(i + 3) % CHART_COLORS.length]} />)}
                                         </Pie>
                                         <Tooltip />

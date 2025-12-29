@@ -213,7 +213,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
                                             onClick={async () => {
                                                 try {
                                                     const token = getAccessToken();
-                                                    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5003';
+                                                    const baseUrl = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:5003' : (() => { throw new Error('VITE_API_BASE_URL required'); })());
                                                     const downloadUrl = `${baseUrl}/api/tickets/${ticketId}/attachments/${attachment.id}/download/`;
 
                                                     const response = await fetch(downloadUrl, {

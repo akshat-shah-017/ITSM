@@ -1211,4 +1211,92 @@
       background-position: 6px -6px;
     }
   }
+
+  /* --- FAB (Floating Action Button) --- */
+  /* Hidden by default, visible only on mobile */
+  .fab {
+    display: none;
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    background: linear-gradient(135deg, #ed1c24 0%, #dc2626 100%);
+    color: #ffffff;
+    box-shadow:
+      0 4px 20px rgba(237, 28, 36, 0.4),
+      0 8px 32px rgba(0, 0, 0, 0.2);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Show FAB only on mobile/tablet screens */
+  @media (max-width: 768px) {
+    .fab {
+      display: flex;
+      bottom: 20px;
+      right: 20px;
+      width: 52px;
+      height: 52px;
+      animation: fab-scale-in 0.3s ease-out;
+    }
+  }
+
+  .fab:hover {
+    transform: scale(1.1);
+    box-shadow:
+      0 6px 28px rgba(237, 28, 36, 0.5),
+      0 12px 40px rgba(0, 0, 0, 0.25);
+  }
+
+  .fab:active {
+    transform: scale(0.95);
+  }
+
+  .fab:focus {
+    outline: none;
+    box-shadow:
+      0 0 0 4px rgba(237, 28, 36, 0.3),
+      0 4px 20px rgba(237, 28, 36, 0.4),
+      0 8px 32px rgba(0, 0, 0, 0.2);
+  }
+
+  @keyframes fab-scale-in {
+    0% {
+      transform: scale(0);
+      opacity: 0;
+    }
+
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  /* Slide up animation for modals */
+  .animate-slide-up {
+    animation: slide-up 0.3s ease-out;
+  }
+
+  /* Slide in from left animation for mobile sidebar */
+  @keyframes slide-in-left {
+    0% {
+      transform: translateX(-100%);
+      opacity: 0;
+    }
+
+    100% {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .animate-slide-in-left {
+    animation: slide-in-left 0.25s ease-out;
+  }
 }

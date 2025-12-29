@@ -4,6 +4,7 @@
 import { Outlet } from 'react-router-dom';
 import { Navbar } from './Navbar';
 import { Sidebar } from './Sidebar';
+import { FAB } from '../pwa';
 
 /**
  * Main application layout for authenticated users
@@ -24,6 +25,9 @@ export function AppLayout() {
                     <Outlet />
                 </main>
             </div>
+
+            {/* Floating Action Button for quick ticket creation */}
+            <FAB />
         </div>
     );
 }
